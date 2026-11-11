@@ -1,0 +1,86 @@
+name: EROFS release
+
+# Started by hand for one dArkOSen release. Publishing the result is what
+# declares that dArkOSen version usable as a ready-made partition.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: dArkOSen release tag to convert (for example 11112026)
+        required: true
+      revision:
+        description: Our revision of this conversion (raise it to publish again)
+        required: true
+        default: "1"
+      prerelease:
+        description: Publish as a pre-release (installers only take full releases)
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM: djparentx/dArkOSen-R36S
+
+jobs:
+  convert:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: erofs
+      - name: Make room and install tools
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq erofs-utils p7zip-full btrfs-progs attr fdisk
+          sudo modprobe erofs
+          sudo modprobe btrfs
+          df -h / /mnt
+      - name: Download the dArkOSen release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/dl"
+          gh release download "${{ inputs.version }}" --repo "$UPSTREAM" --dir "$RUNNER_TEMP/dl" --pattern '*.7z*'
+          cd "$RUNNER_TEMP/dl"
+          ls -la
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import hashlib, json, os
+          assets = []
+          for name in sorted(os.listdir(".")):
+              h = hashlib.sha256()
+              with open(name, "rb") as f:
+                  for block in iter(lambda: f.read(1 << 20), b""):
+                      h.update(block)
+              assets.append({"name": name, "size": os.path.getsize(name), "sha256": h.hexdigest()})
+          print("UPSTREAM_ASSETS=" + json.dumps(assets))
+          PY
+      - name: Unpack the disk image
+        run: |
+          cd "$RUNNER_TEMP/dl"
+          first=$(ls | sort | head -1)
+          7z l "$first" | tail -5
+          mkdir -p "$RUNNER_TEMP/img"
+          7z x -o"$RUNNER_TEMP/img" "$first" '*.img' -r
+          rm -f ./*
+          ls -la "$RUNNER_TEMP/img"
+          df -h /
+      - name: Convert and verify
+        run: |
+          image=$(find "$RUNNER_TEMP/img" -name '*.img' | head -1)
+          mkdir -p "$RUNNER_TEMP/out"
+          sudo --preserve-env=UPSTREAM,UPSTREAM_ASSETS bash erofs/convert.sh "$image" "$RUNNER_TEMP/out" "${{ inputs.version }}" "${{ inputs.revision }}"
+          sudo chown -R "$USER" "$RUNNER_TEMP/out"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ inputs.version }}-erofs${{ inputs.revision }}"
+          flag=""
+          [ "${{ inputs.prerelease }}" = "true" ] && flag="--prerelease"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $flag \
+            --title "dArkOSen ${{ inputs.version }} as EROFS (revision ${{ inputs.revision }})" \
+            --notes "The root filesystem of dArkOSen ${{ inputs.version }}, unchanged, as a compressed read-only EROFS image for andr36oid. Join the parts in order to get the image; manifest.json lists sizes and checksums." \
+            "$RUNNER_TEMP"/out/*
