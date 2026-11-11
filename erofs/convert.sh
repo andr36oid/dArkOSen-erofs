@@ -12,7 +12,7 @@ set -euo pipefail
 
 image=$1 out=$2 version=$3 revision=$4
 here=$(cd "$(dirname "$0")" && pwd)
-part_bytes=$((1900 * 1024 * 1024))   # release assets must stay under 2 GiB
+part_bytes=$((2040 * 1024 * 1024))   # GitHub takes release files under 2 GiB only
 work=$(mktemp -d "$(dirname "$out")/work.XXXXXX")   # beside the output, never in it
 src=$work/src new=$work/new
 mkdir -p "$src" "$new"
