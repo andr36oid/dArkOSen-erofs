@@ -82,5 +82,5 @@ jobs:
           [ "${{ inputs.prerelease }}" = "true" ] && flag="--prerelease"
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $flag \
             --title "dArkOSen ${{ inputs.version }} as EROFS (revision ${{ inputs.revision }})" \
-            --notes "The root filesystem of dArkOSen ${{ inputs.version }}, unchanged, as a compressed read-only EROFS image for andr36oid. Join the parts in order to get the image; manifest.json lists sizes and checksums." \
+            --notes "The root filesystem of dArkOSen ${{ inputs.version }}, unchanged, as a compressed read-only EROFS image for andr36oid. Packed with xz; manifest.json lists files, sizes and checksums." \
             "$RUNNER_TEMP"/out/*

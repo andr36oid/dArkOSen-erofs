@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""manifest.py <out> <image name> <size> <sha256> <version> <revision> <hotfix folder>
+"""manifest.py <out> <image name> <size> <sha256> <version> <revision> <hotfix folder> <packed size> <packed sha256>
 
 Writes manifest.json, the one file an installer reads to know what this release
-is: which dArkOSen version, how large the EROFS image is, its parts in order,
+is: which dArkOSen version, how large the EROFS image is, the file(s) to download,
 how large a partition should be made for it, and the hotfixes that belong to it.
 """
 import hashlib, json, os, shutil, sys, zipfile
 
-out, name, size, digest, version, revision, fixes = sys.argv[1:8]
-size = int(size)
+out, name, size, digest, version, revision, fixes, packed_size, packed_digest = sys.argv[1:10]
+size, packed_size = int(size), int(packed_size)
 GIB = 1 << 30
 
 
@@ -20,12 +20,13 @@ def sha256(path):
     return h.hexdigest()
 
 
+# One file <name>.xz, or <name>.xz.001, .002, ... to be joined in that order
 parts = []
-for part in sorted(p for p in os.listdir(out) if p.startswith(name + ".")):
+for part in sorted(p for p in os.listdir(out) if p.startswith(name + ".xz")):
     path = os.path.join(out, part)
     parts.append({"name": part, "size": os.path.getsize(path), "sha256": sha256(path)})
-if sum(p["size"] for p in parts) != size:
-    sys.exit("parts do not add up to the image size")
+if sum(p["size"] for p in parts) != packed_size:
+    sys.exit("download files do not add up to the packed size")
 
 hotfixes = []
 if os.path.isdir(fixes):
@@ -58,8 +59,10 @@ manifest = {
     "revision": int(revision),
     "upstream": {"repository": os.environ.get("UPSTREAM", ""), "tag": version,
                  "assets": json.loads(os.environ.get("UPSTREAM_ASSETS", "[]"))},
-    "image": {"name": name, "filesystem": "erofs", "size": size, "sha256": digest,
-              "parts": parts},
+    # the image as it goes onto the partition, after unpacking
+    "image": {"name": name, "filesystem": "erofs", "size": size, "sha256": digest},
+    "download": {"compression": "xz", "name": name + ".xz", "size": packed_size,
+                 "sha256": packed_digest, "parts": parts},
     # room for a later, somewhat larger release: a quarter on top, whole GiB
     "partition_bytes": -(-(size + size // 4) // GIB) * GIB,
     "minimum_andr36oid": minimum,

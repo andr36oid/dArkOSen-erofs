@@ -2,8 +2,9 @@
 # convert.sh <dArkOSen disk image> <output folder> <dArkOSen version> <revision>
 #
 # Takes the root filesystem out of a dArkOSen release image and writes it again
-# as a compressed read-only EROFS image, split into parts small enough for a
-# GitHub release, with a manifest.json that describes them. Nothing in the
+# as a compressed read-only EROFS image, packed with xz (and cut into parts only
+# if it is still too large for one GitHub release file), with a manifest.json
+# that describes it. Nothing in the
 # filesystem is changed, added or left out: after writing, every file, link,
 # owner, mode and extended attribute is compared with the original.
 #
@@ -84,10 +85,18 @@ umount "$src"; losetup -d "$src_loop"; src_loop=
 
 size=$(stat -c %s "$out/$name")
 sum=$(sha256sum "$out/$name" | cut -d' ' -f1)
-(cd "$out" && split -b "$part_bytes" -d -a 3 --numeric-suffixes=1 "$name" "$name.")
-rm "$out/$name"
+# Packed with xz for the download. Only cut into parts when the packed file is
+# still too large for one release file.
+xz -T0 -6 "$out/$name"
+packed_size=$(stat -c %s "$out/$name.xz")
+packed_sum=$(sha256sum "$out/$name.xz" | cut -d' ' -f1)
+echo "image $size bytes, packed $packed_size bytes"
+if [ "$packed_size" -gt "$part_bytes" ]; then
+	(cd "$out" && split -b "$part_bytes" -d -a 3 --numeric-suffixes=1 "$name.xz" "$name.xz.")
+	rm "$out/$name.xz"
+fi
 
-python3 "$here/manifest.py" "$out" "$name" "$size" "$sum" "$version" "$revision" "$here/hotfixes/$version"
+python3 "$here/manifest.py" "$out" "$name" "$size" "$sum" "$version" "$revision" "$here/hotfixes/$version" "$packed_size" "$packed_sum"
 (cd "$out" && sha256sum -- * > "$work/sums")
 mv "$work/sums" "$out/SHA256SUMS"
 ls -la "$out"
